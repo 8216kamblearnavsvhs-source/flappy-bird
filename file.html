@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ultimate Space Shooter</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: black;
+  }
+  canvas {
+    display: block;
+    background: radial-gradient(ellipse at center, #000010 0%, #000000 100%);
+  }
+  #hud {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    color: white;
+    font-family: Consolas, monospace;
+    font-size: 18px;
+  }
+  #gameOver {
+    position: absolute;
+    top: 40%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-family: Arial, sans-serif;
+    font-size: 36px;
+    text-align: center;
+    display: none;
+  }
+</style>
+</head>
+<body>
+<div id="hud">Score: 0 | Health: 3 | Level: 1</div>
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+<div id="gameOver">
+  <p>Game Over!</p>
+  <p>Press <b>R</b> to Restart</p>
+</div>
+
+<script>
+// === CONFIG ===
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const hud = document.getElementById('hud');
+const gameOverEl = document.getElementById('gameOver');
+
+let keys = {};
+let bullets = [];
+let enemies = [];
+let explosions = [];
+let stars = [];
+
+let player, score = 0, level = 1, gameOver = false, enemySpawnRate = 60;
+
+// === SOUNDS ===
+const laserSound = new Audio('[actions.google.com](https://actions.google.com/sounds/v1/weapons/laser_1.ogg)');
+const explosionSound = new Audio('[actions.google.com](https://actions.google.com/sounds/v1/explosions/explosion_short.ogg)');
+const bgMusic = new Audio('[upload.wikimedia.org](https://upload.wikimedia.org/wikipedia/commons/c/c8/Space_ambience.ogg)');
+bgMusic.loop = true;
+bgMusic.volume = 0.2;
+
+// === OBJECTS ===
+class Player {
+  constructor() {
+    this.x = canvas.width / 2;
+    this.y = canvas.height - 60;
+    this.width = 40;
+    this.height = 40;
+    this.speed = 5;
+    this.health = 3;
+  }
+  draw() {
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.fillStyle = 'cyan';
+    ctx.beginPath();
+    ctx.moveTo(0, -20);
+    ctx.lineTo(15, 20);
+    ctx.lineTo(-15, 20);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  update() {
+    if (keys['ArrowLeft'] && this.x > 20) this.x -= this.speed;
+    if (keys['ArrowRight'] && this.x < canvas.width - 20) this.x += this.speed;
+    if (keys[' '] && frameCount % 10 === 0) this.shoot();
+  }
+  shoot() {
+    bullets.push(new Bullet(this.x, this.y - 20));
+    laserSound.currentTime = 0;
+    laserSound.play();
+  }
+}
+
+class Bullet {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.width = 4;
+    this.height = 12;
+    this.speed = 7;
+  }
+  draw() {
+    ctx.fillStyle = 'yellow';
+    ctx.fillRect(this.x - 2, this.y - 10, this.width, this.height);
+  }
+  update() {
+    this.y -= this.speed;
+  }
+}
+
+class Enemy {
+  constructor(x, y, type = 1) {
+    this.x = x;
+    this.y = y;
+    this.width = 32;
+    this.height = 32;
+    this.speed = 1 + level * 0.3;
+    this.health = type === 2 ? 2 : 1;
+    this.type = type;
+  }
+  draw() {
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.fillStyle = this.type === 2 ? 'orange' : 'red';
+    ctx.beginPath();
+    ctx.arc(0, 0, 15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  update() {
+    this.y += this.speed;
+  }
+}
+
+class Explosion {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.radius = 0;
+    this.maxRadius = 20;
+  }
+  draw() {
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,165,0,' + (1 - this.radius/this.maxRadius) + ')';
+    ctx.fill();
+  }
+  update() {
+    this.radius += 2;
+  }
+}
+
+class Star {
+  constructor() {
+    this.x = Math.random() * canvas.width;
+    this.y = Math.random() * canvas.height;
+    this.size = Math.random() * 2;
+    this.speed = 0.3 + Math.random() * 0.7;
+  }
+  draw() {
+    ctx.fillStyle = 'white';
+    ctx.fillRect(this.x, this.y, this.size, this.size);
+  }
+  update() {
+    this.y += this.speed;
+    if (this.y > canvas.height) {
+      this.y = 0;
+      this.x = Math.random() * canvas.width;
+    }
+  }
+}
+
+// === INIT ===
+function init() {
+  player = new Player();
+  bullets = [];
+  enemies = [];
+  explosions = [];
+  stars = Array.from({length: 100}, () => new Star());
+  score = 0;
+  level = 1;
+  enemySpawnRate = 60;
+  gameOver = false;
+  gameOverEl.style.display = 'none';
+  bgMusic.play();
+}
+
+// === COLLISIONS ===
+function isColliding(a, b) {
+  return !(a.x + a.width/2 < b.x - b.width/2 ||
+           a.x - a.width/2 > b.x + b.width/2 ||
+           a.y + a.height/2 < b.y - b.height/2 ||
+           a.y - a.height/2 > b.y + b.height/2);
+}
+
+// === MAIN LOOP ===
+let frameCount = 0;
+function gameLoop() {
+  if (gameOver) return;
+  frameCount++;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Stars background
+  stars.forEach(s => {
+    s.update();
+    s.draw();
+  });
+
+  // Player
+  player.update();
+  player.draw();
+
+  // Bullets
+  bullets = bullets.filter(b => b.y > 0);
+  bullets.forEach(b => {
+    b.update();
+    b.draw();
+  });
+
+  // Enemies
+  if (frameCount % enemySpawnRate === 0) {
+    let x = Math.random() * (canvas.width - 40) + 20;
+    let type = Math.random() > 0.8 ? 2 : 1;
+    enemies.push(new Enemy(x, -20, type));
+  }
+  enemies.forEach(e => {
+    e.update();
+    e.draw();
+  });
+
+  // Check collisions
+  bullets.forEach((b, bi) => {
+    enemies.forEach((e, ei) => {
+      if (isColliding({x: b.x, y: b.y, width: b.width, height: b.height},
+                      {x: e.x, y: e.y, width: e.width, height: e.height})) {
+        explosions.push(new Explosion(e.x, e.y));
+        explosionSound.currentTime = 0;
+        explosionSound.play();
+        e.health--;
+        bullets.splice(bi, 1);
+        if (e.health <= 0) {
+          enemies.splice(ei, 1);
+          score += 10;
+        }
+      }
+    });
+  });
+
+  enemies.forEach((e, ei) => {
+    if (isColliding(player, e) || e.y > canvas.height) {
+      explosions.push(new Explosion(e.x, e.y));
+      enemies.splice(ei, 1);
+      player.health--;
+      if (player.health <= 0) endGame();
+    }
+  });
+
+  // Explosions
+  explosions.forEach((ex, i) => {
+    ex.update();
+    ex.draw();
+    if (ex.radius > ex.maxRadius) explosions.splice(i, 1);
+  });
+
+  // Level Up logic
+  if (score > level * 100) {
+    level++;
+    enemySpawnRate = Math.max(20, 60 - level * 5);
+  }
+
+  // Update HUD
+  hud.textContent = `Score: ${score} | Health: ${player.health} | Level: ${level}`;
+
+  requestAnimationFrame(gameLoop);
+}
+
+function endGame() {
+  gameOver = true;
+  bgMusic.pause();
+  gameOverEl.style.display = 'block';
+}
+
+// === INPUT ===
+window.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (gameOver && e.key.toLowerCase() === 'r') {
+    init();
+    requestAnimationFrame(gameLoop);
+  }
+});
+window.addEventListener('keyup', e => keys[e.key] = false);
+
+// === START ===
+init();
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
